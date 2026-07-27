@@ -31,7 +31,10 @@ def validate_password(password: str) -> bool:
 
 def get_client_info(request):
     """Extract client IP and user agent from request."""
-    ip_address = request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr)
+    # X-Forwarded-For puede venir como lista "ip1, ip2, ..." (proxies/Render);
+    # tomar solo la primera IP (la real del cliente).
+    xff = request.environ.get('HTTP_X_FORWARDED_FOR', '')
+    ip_address = xff.split(',')[0].strip() if xff else request.remote_addr
     user_agent = request.headers.get('User-Agent', '')[:500]  # Limit length
     return ip_address, user_agent
 

@@ -553,8 +553,8 @@ class CropRecommendationAPI {
     context?: any;
   }> {
     try {
-      // Use the direct chat endpoint
-      const chatEndpoint = 'https://10.49.12.46:420/api/chat';
+      // Use the direct chat endpoint (usa la URL base configurable)
+      const chatEndpoint = `${import.meta.env.VITE_API_BASE_URL || 'https://10.49.12.46:420/api'}/chat`;
       
       const response = await fetch(chatEndpoint, {
         method: 'POST',

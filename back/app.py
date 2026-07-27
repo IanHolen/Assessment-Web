@@ -52,6 +52,7 @@ _default_origins = [
     'http://172.28.69.128:8000',
     'http://localhost:5173',
     'http://localhost:8080',
+    'https://ianholen.github.io',
 ]
 _env_origins = [o.strip() for o in os.getenv('CORS_ORIGINS', '').split(',') if o.strip()]
 cors_config = {

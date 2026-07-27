@@ -1,0 +1,23 @@
+name: Keep-alive (backend + DB)
+
+# Mantiene despiertos el backend (Render free) y la base de datos (Aiven free, que se
+# apaga por inactividad). /api/health consulta la DB, así que la mantiene activa.
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'   # cada 10 minutos
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /api/health (toca la DB)
+        run: |
+          for i in 1 2 3 4; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" -m 70 "https://crop-backend-pzmv.onrender.com/api/health" || echo "000")
+            echo "intento $i -> HTTP $code"
+            [ "$code" = "200" ] && { echo "OK, backend+DB vivos"; exit 0; }
+            sleep 25
+          done
+          echo "::warning::backend/DB no respondió 200 tras 4 intentos"

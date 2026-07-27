@@ -8,7 +8,7 @@ from datetime import datetime
 import os
 import logging
 import requests
-from gpu_client import GPUInferenceClient
+from crop_inference import LocalInferenceClient
 from auth_models import AuthDatabase, JWTManager
 from auth_utils import (
     require_auth, require_auth_optional, validate_email, validate_username,
@@ -24,28 +24,38 @@ from chat_endpoints import chat_bp
 from about_endpoints import about_bp
 from prediction_log_endpoints import prediction_logs_bp
 
-# Configure logging
+# Configure logging (stdout siempre; archivo opcional vía LOG_FILE)
+_log_handlers = [logging.StreamHandler()]
+_log_file = os.getenv('LOG_FILE')
+if _log_file:
+    try:
+        os.makedirs(os.path.dirname(_log_file), exist_ok=True)
+        _log_handlers.append(logging.FileHandler(_log_file))
+    except Exception:
+        pass
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('/var/log/crop-api/app.log'),
-        logging.StreamHandler()
-    ]
+    handlers=_log_handlers
 )
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# Configure CORS with specific origins and handle preflight requests properly
+# Configure CORS. Orígenes por defecto + los que se agreguen vía env CORS_ORIGINS
+# (lista separada por comas, p.ej. la URL del frontend desplegado).
+_default_origins = [
+    'https://agriai.local:420',
+    'https://10.49.12.46:420',
+    'https://172.28.69.47',
+    'http://172.28.69.200:8000',
+    'http://172.28.69.128:8000',
+    'http://localhost:5173',
+    'http://localhost:8080',
+]
+_env_origins = [o.strip() for o in os.getenv('CORS_ORIGINS', '').split(',') if o.strip()]
 cors_config = {
-    'origins': [
-        'https://agriai.local:420',
-        'https://10.49.12.46:420',
-        'https://172.28.69.47',
-        'http://172.28.69.200:8000',
-        'http://172.28.69.128:8000'
-    ],
+    'origins': _default_origins + _env_origins,
     'supports_credentials': True,
     'methods': ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     'allow_headers': ['Content-Type', 'Authorization', 'X-Requested-With'],
@@ -64,13 +74,16 @@ limiter.init_app(app)
 
 # Production Database Configuration - PostgreSQL
 DB_CONFIG = {
-    'host': '172.28.69.148',
-    'port': 5432,
-    'user': 'cropapi',
-    'password': 'cropapi123',
-    'database': 'crop_recommendations',
+    'host': os.getenv('DB_HOST', '172.28.69.148'),
+    'port': int(os.getenv('DB_PORT', '5432')),
+    'user': os.getenv('DB_USER', 'cropapi'),
+    'password': os.getenv('DB_PASSWORD', 'cropapi123'),
+    'database': os.getenv('DB_NAME', 'crop_recommendations'),
     'connect_timeout': 10
 }
+# Aiven / Postgres gestionado exige SSL: DB_SSLMODE=require
+if os.getenv('DB_SSLMODE'):
+    DB_CONFIG['sslmode'] = os.getenv('DB_SSLMODE')
 
 # JWT Secret - In production, use environment variable
 app.config['JWT_SECRET'] = os.getenv('JWT_SECRET', 'your-super-secure-secret-key-change-in-production')
@@ -102,17 +115,12 @@ app.register_blueprint(about_bp)
 app.register_blueprint(prediction_logs_bp)
 
 
-# Initialize GPU inference client
+# Initialize local inference engine (in-process, numpy — sin servicio GPU externo)
 try:
-    engine = GPUInferenceClient(base_url="http://172.28.69.2:8081")
-    health_check = engine.health_check()
-    if health_check.get('status') == 'healthy':
-        logger.info(f"GPU inference client connected successfully")
-        logger.info(f"Available models: {list(engine.models.keys())}")
-    else:
-        logger.warning(f"GPU inference service health check failed: {health_check}")
+    engine = LocalInferenceClient()
+    logger.info(f"Local inference engine ready. Models: {list(engine.models.keys())}")
 except Exception as e:
-    logger.error(f"Failed to initialize GPU inference client: {e}")
+    logger.error(f"Failed to initialize inference engine: {e}")
     raise
 
 def test_db_connection():
@@ -1116,14 +1124,17 @@ def chat_proxy():
 if __name__ == '__main__':
     # Test database connection on startup
     if test_db_connection():
-        logger.info("Starting Flask application with HTTPS...")
-        # Production configuration with SSL
+        port = int(os.getenv('PORT', '8443'))
+        # SSL solo si USE_SSL=true (en la nube, el host provee TLS).
+        use_ssl = os.getenv('USE_SSL', 'false').lower() == 'true'
+        ssl_ctx = ('certs/cert.pem', 'certs/key.pem') if use_ssl else None
+        logger.info(f"Starting Flask on 0.0.0.0:{port} (ssl={use_ssl})")
         app.run(
             host='0.0.0.0',
-            port=8443,
+            port=port,
             debug=False,
             threaded=True,
-            ssl_context=('certs/cert.pem', 'certs/key.pem')
+            ssl_context=ssl_ctx
         )
     else:
         logger.error("Failed to establish database connection. Exiting.")

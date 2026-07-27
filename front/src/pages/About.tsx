@@ -235,7 +235,7 @@ const About = () => {
             </p>
             <div className="space-y-2">
               <p className="text-green-100">
-                <strong>Contacto:</strong> a01252831@tec.mx | +52 (662) 227-1342
+                <strong>Contacto:</strong> holenderian@gmail.com | +52 55 4790 3290
               </p>
               <p className="text-green-100">
                 <strong>Ubicación:</strong> Tec de Monterrey, CSF

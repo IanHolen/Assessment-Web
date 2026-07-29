@@ -1,0 +1,26 @@
+name: Heartbeat (mantiene el repo activo para siempre)
+
+# GitHub deshabilita los workflows programados (cron) si un repo publico pasa 60 dias
+# SIN COMMITS (las corridas del keepalive NO cuentan como actividad, solo los commits).
+# Este workflow hace un commit vacio cada ~10 dias -> el repo nunca queda inactivo ->
+# el keepalive nunca se deshabilita -> la DB vive para siempre. 100% automatico y gratis.
+
+on:
+  schedule:
+    - cron: '0 6 */10 * *'   # dias 1, 11, 21, 31 (~cada 10 dias; muy por debajo del limite de 60)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Commit vacio para refrescar la actividad del repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit --allow-empty -m "chore: heartbeat keepalive (evita auto-disable de 60 dias) [skip ci]"
+          git push

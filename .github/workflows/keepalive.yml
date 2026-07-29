@@ -1,23 +1,40 @@
 name: Keep-alive (backend + DB)
 
 # Mantiene despiertos el backend (Render free) y la base de datos (Aiven free, que se
-# apaga por inactividad). /api/health consulta la DB, así que la mantiene activa.
+# apaga por inactividad). /api/health hace SELECT COUNT(*) FROM crops, asi que toca la DB.
+# GitHub throttlea los cron frecuentes (colapsa "*/10" a cada 1-2h), asi que en vez de
+# depender del disparo del cron, CADA corrida es un bucle que se queda vivo ~5.5h
+# pingueando cada 10 min por dentro. El cron solo relanza el bucle; con cancel-in-progress
+# siempre hay exactamente un bucle activo -> cobertura continua.
+# Repo publico = minutos de Actions ilimitados, cero costo.
 
 on:
   schedule:
-    - cron: '*/10 * * * *'   # cada 10 minutos
+    - cron: '*/10 * * * *'   # GitHub lo dispara ~cada 1-2h (throttled); basta para relanzar el bucle
   workflow_dispatch:
+
+# Un solo bucle vivo a la vez: cada disparo cancela el anterior y arranca fresco.
+concurrency:
+  group: keepalive-loop
+  cancel-in-progress: true
 
 jobs:
   ping:
     runs-on: ubuntu-latest
+    timeout-minutes: 335   # bajo el limite de 360 (6h) de GitHub
     steps:
-      - name: Ping /api/health (toca la DB)
+      - name: Ping /api/health cada 10 min por ~5.5h (toca la DB)
         run: |
-          for i in 1 2 3 4; do
-            code=$(curl -s -o /dev/null -w "%{http_code}" -m 70 "https://crop-backend-pzmv.onrender.com/api/health" || echo "000")
-            echo "intento $i -> HTTP $code"
-            [ "$code" = "200" ] && { echo "OK, backend+DB vivos"; exit 0; }
-            sleep 25
+          URL="https://crop-backend-pzmv.onrender.com/api/health"
+          END=$((SECONDS + 330*60))   # 5.5 horas
+          while [ "$SECONDS" -lt "$END" ]; do
+            ok=0
+            for i in 1 2 3 4; do
+              code=$(curl -s -o /dev/null -w "%{http_code}" -m 70 "$URL" || echo "000")
+              echo "$(date -u +%H:%M:%S) intento $i -> HTTP $code"
+              if [ "$code" = "200" ]; then ok=1; break; fi
+              sleep 25
+            done
+            [ "$ok" = "0" ] && echo "::warning::backend/DB no respondio 200. Si Aiven sigue apagado, enciendelo 1 vez a mano."
+            sleep 600   # 10 minutos hasta el siguiente ping
           done
-          echo "::warning::backend/DB no respondió 200 tras 4 intentos"
